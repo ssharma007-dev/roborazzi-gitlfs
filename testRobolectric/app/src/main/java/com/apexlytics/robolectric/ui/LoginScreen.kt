@@ -26,6 +26,6 @@ fun LoginScreen() {
         Spacer(Modifier.height(16.dp))
         OutlinedTextField(value = "", onValueChange = {}, label = { Text("Password") }, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(24.dp))
-        Button(onClick = {}, modifier = Modifier.fillMaxWidth()) { Text("LOG IN") }
+        Button(onClick = {}, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6200EE))) { Text("SIGN IN") }
     }
 }

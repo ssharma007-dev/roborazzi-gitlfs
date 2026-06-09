@@ -40,6 +40,113 @@ roborazzi {
     outputDir = file("src/test/snapshots/images")
 }
 
+// ── Robolectric diff images ────────────────────────────────────────────────
+// When tests run in verify mode (roborazzi.test.record=false), Roborazzi saves
+// the new captures to build/intermediates/roborazzi/. This task compares those
+// against the committed baselines and produces 3-panel diff PNGs (REFERENCE | DIFF | ACTUAL).
+
+def refsDir   = file("src/test/snapshots/images")          // committed baselines
+def actualsDir = file("build/intermediates/roborazzi")     // new captures from last test run
+def diffsDir  = file("src/test/snapshots/diffs")
+
+project.ext.roboTimings = [:]
+
+task compareScreenshots {
+    doLast {
+        project.ext.roboTimings.compareStart = System.currentTimeMillis()
+
+        if (!actualsDir.exists() || actualsDir.listFiles()?.length == 0) {
+            println "[compareScreenshots] No actuals found — run ./gradlew test first."
+            return
+        }
+
+        diffsDir.mkdirs()
+        int GAP = 4
+
+        actualsDir.listFiles()?.findAll { it.name.endsWith('.png') }?.each { actual ->
+            def ref = new File(refsDir, actual.name)
+            if (!ref.exists()) {
+                println "[NEW] ${actual.name}"
+                return
+            }
+
+            def imgA = javax.imageio.ImageIO.read(actual)
+            def imgR = javax.imageio.ImageIO.read(ref)
+
+            if (imgA.width != imgR.width || imgA.height != imgR.height) {
+                println "[FAIL] ${actual.name} — size changed"
+                return
+            }
+
+            int W = imgA.width, H = imgA.height
+            long diffPixels = 0
+            def diffPanel = new java.awt.image.BufferedImage(W, H, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+            for (int y = 0; y < H; y++) {
+                for (int x = 0; x < W; x++) {
+                    int ap = imgA.getRGB(x, y), rp = imgR.getRGB(x, y)
+                    if (ap != rp) { diffPixels++; diffPanel.setRGB(x, y, 0xFFFF0000.toInteger()) }
+                    else          { diffPanel.setRGB(x, y, ap) }
+                }
+            }
+
+            def pct = String.format("%.2f", diffPixels * 100.0 / ((long) W * H))
+            if (diffPixels > 0) {
+                println "[FAIL] ${actual.name} — ${diffPixels} pixels differ (${pct}%)"
+
+                def composite = new java.awt.image.BufferedImage(W * 3 + GAP * 2, H, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+                def g = composite.createGraphics()
+                g.setColor(java.awt.Color.DARK_GRAY); g.fillRect(0, 0, composite.width, H)
+                g.drawImage(imgR,    0,              0, null)
+                g.drawImage(diffPanel, W + GAP,      0, null)
+                g.drawImage(imgA,    W * 2 + GAP * 2, 0, null)
+                g.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 28))
+                [["REFERENCE", 0], ["DIFF (${diffPixels}px / ${pct}%)", W + GAP], ["ACTUAL", W * 2 + GAP * 2]].each { label, xOff ->
+                    g.setColor(new java.awt.Color(0, 0, 0, 160)); g.fillRect(xOff, 0, W, 40)
+                    g.setColor(java.awt.Color.WHITE); g.drawString(label, xOff + 8, 30)
+                }
+                g.dispose()
+                javax.imageio.ImageIO.write(composite, "PNG", new File(diffsDir, actual.name))
+            } else {
+                println "[PASS] ${actual.name}"
+            }
+        }
+
+        project.ext.roboTimings.compareMs = System.currentTimeMillis() - project.ext.roboTimings.compareStart
+        println "⏱  Robolectric comparison: ${project.ext.roboTimings.compareMs}ms"
+    }
+}
+
+// Stage diffs + push to GitHub; records upload time
+task pushResults {
+    doLast {
+        project.ext.roboTimings.pushStart = System.currentTimeMillis()
+
+        def gitDir = rootProject.projectDir
+        exec { workingDir gitDir; commandLine 'git', 'add', 'testRobolectric/app/src/test/snapshots/diffs/' }
+        def statusOut = new ByteArrayOutputStream()
+        exec { workingDir gitDir; commandLine 'git', 'status', '--porcelain'; standardOutput = statusOut }
+        if (statusOut.toString().trim()) {
+            exec { workingDir gitDir; commandLine 'git', 'commit', '-m', "chore: update Robolectric screenshot diffs [auto]" }
+        }
+        exec { workingDir gitDir; commandLine 'git', 'push' }
+
+        project.ext.roboTimings.pushMs = System.currentTimeMillis() - project.ext.roboTimings.pushStart
+
+        println ""
+        println "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        println " Roborazzi (Robolectric) — Timing Report"
+        println "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        println " Phase                          Duration"
+        println " ─────────────────────────────  ────────"
+        def cmp = project.ext.roboTimings.containsKey('compareMs') ? "${project.ext.roboTimings.compareMs}ms" : "n/a"
+        println " Pixel comparison (all files)   ${cmp}"
+        println " git push  (LFS upload)         ${project.ext.roboTimings.pushMs}ms"
+        println "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        println " (test execution time shown in Gradle build summary above)"
+        println ""
+    }
+}
+
 def roborazzi_version = rootProject.ext.roborazzi_version
 
 dependencies {

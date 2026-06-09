@@ -40,19 +40,28 @@ dependencies {
 // ── Snapshot directories ───────────────────────────────────────────────────
 // references/ → committed baselines (Git LFS). Updated intentionally via saveReferences.
 // images/     → screenshots from the latest test run (gitignored, overwritten each run).
-// diffs/      → pixel-diff output when comparison fails (gitignored).
+// diffs/      → 3-panel diff PNGs when comparison fails (committed to git for visibility).
 
 def refsDir   = file("src/test/snapshots/references")
 def imagesDir = file("src/test/snapshots/images")
 def diffsDir  = file("src/test/snapshots/diffs")
 
+// Shared timing map — populated by each phase task, printed by printTimingSummary
+project.ext.phaseTimings = [:]
+
 // Pull device-side screenshots to images/ after connected tests complete
 task pullScreenshots(type: Exec) {
-    doFirst { imagesDir.mkdirs() }
+    doFirst {
+        imagesDir.mkdirs()
+        project.ext.phaseTimings.pullStart = System.currentTimeMillis()
+    }
     commandLine 'adb', 'pull',
         '/sdcard/roborazzi-snapshots/.',
         imagesDir.absolutePath
     ignoreExitValue = true
+    doLast {
+        project.ext.phaseTimings.pullMs = System.currentTimeMillis() - project.ext.phaseTimings.pullStart
+    }
 }
 
 // Pixel-diff images/ against references/.
@@ -61,6 +70,7 @@ task compareScreenshots {
     dependsOn pullScreenshots
 
     doLast {
+        project.ext.phaseTimings.compareStart = System.currentTimeMillis()
         if (!refsDir.exists() || refsDir.listFiles()?.length == 0) {
             println "[compareScreenshots] No references found — run ./gradlew saveReferences first."
             return
@@ -141,9 +151,52 @@ task compareScreenshots {
             }
         }
 
+        project.ext.phaseTimings.compareMs = System.currentTimeMillis() - project.ext.phaseTimings.compareStart
+
         if (failed) {
             throw new GradleException("Screenshot comparison failed. Check diffs at: ${diffsDir.absolutePath}")
         }
+    }
+}
+
+// Stage diffs + push to GitHub; records upload time
+task pushResults {
+    doLast {
+        project.ext.phaseTimings.pushStart = System.currentTimeMillis()
+
+        def gitDir = rootProject.projectDir
+        exec { workingDir gitDir; commandLine 'git', 'add', 'testAndroidDevice/app/src/test/snapshots/diffs/' }
+        def statusOut = new ByteArrayOutputStream()
+        exec { workingDir gitDir; commandLine 'git', 'status', '--porcelain'; standardOutput = statusOut }
+        if (statusOut.toString().trim()) {
+            exec { workingDir gitDir; commandLine 'git', 'commit', '-m', "chore: update screenshot diffs [auto]" }
+        }
+        exec { workingDir gitDir; commandLine 'git', 'push' }
+
+        project.ext.phaseTimings.pushMs = System.currentTimeMillis() - project.ext.phaseTimings.pushStart
+    }
+}
+
+// Print a timing summary table after the full pipeline completes
+task printTimingSummary {
+    doLast {
+        def t = project.ext.phaseTimings
+        def pull    = t.containsKey('pullMs')    ? "${t.pullMs}ms"    : "n/a"
+        def compare = t.containsKey('compareMs') ? "${t.compareMs}ms" : "n/a"
+        def push    = t.containsKey('pushMs')    ? "${t.pushMs}ms"    : "n/a"
+
+        println ""
+        println "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        println " Roborazzi + Git LFS  —  Timing Report"
+        println "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        println " Phase                          Duration"
+        println " ─────────────────────────────  ────────"
+        println " adb pull  (device → host)      ${pull}"
+        println " Pixel comparison (all files)   ${compare}"
+        println " git push  (LFS upload)         ${push}"
+        println "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        println " (device test execution time shown in Gradle summary above)"
+        println ""
     }
 }
 
@@ -158,4 +211,6 @@ task saveReferences(type: Copy) {
 afterEvaluate {
     tasks.findByName('connectedDebugAndroidTest')?.finalizedBy(pullScreenshots)
     pullScreenshots.finalizedBy(compareScreenshots)
+    compareScreenshots.finalizedBy(printTimingSummary)
+    pushResults.finalizedBy(printTimingSummary)
 }
