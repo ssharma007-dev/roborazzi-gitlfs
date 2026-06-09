@@ -4,3 +4,7 @@ local.properties
 *.iml
 .idea/
 .DS_Store
+
+# Device test — screenshots from last run (not the committed baseline)
+testAndroidDevice/app/src/test/snapshots/images/
+testAndroidDevice/app/src/test/snapshots/diffs/

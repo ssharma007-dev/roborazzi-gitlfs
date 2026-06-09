@@ -12,7 +12,10 @@ class SinglePageTest : BaseTest() {
     fun setUp() = launchApp()
 
     @Test
-    fun singlePage_login_screenshot() {
-        captureScreen("single_page__login")
+    fun singlePage_aiPlayground_screenshot() {
+        login()
+        navigateToFullFlow()
+        navigateToAiPlayground()
+        captureScreen("single_page__ai_playground")
     }
 }

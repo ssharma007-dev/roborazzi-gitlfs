@@ -15,7 +15,6 @@ android {
         versionCode 1
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        testInstrumentationRunnerArguments(["roborazzi.test.record": project.properties["roborazzi.test.record"] ?: "false"])
     }
 
     compileOptions {
@@ -27,24 +26,6 @@ android {
     }
 }
 
-roborazzi {
-    outputDir = file("src/test/snapshots/images")
-}
-
-// After connected tests finish, pull device-side screenshots to the host snapshots directory
-task pullScreenshots(type: Exec) {
-    def snapshotsDir = file("src/test/snapshots/images")
-    doFirst { snapshotsDir.mkdirs() }
-    commandLine 'adb', 'pull',
-        '/sdcard/roborazzi-snapshots/.',
-        snapshotsDir.absolutePath
-    ignoreExitValue = true
-}
-
-afterEvaluate {
-    tasks.findByName('connectedDebugAndroidTest')?.finalizedBy(pullScreenshots)
-}
-
 def roborazzi_version = rootProject.ext.roborazzi_version
 
 dependencies {
@@ -54,4 +35,96 @@ dependencies {
     androidTestImplementation 'androidx.test.uiautomator:uiautomator:2.3.0'
     androidTestImplementation "io.github.takahirom.roborazzi:roborazzi:$roborazzi_version"
     androidTestImplementation "io.github.takahirom.roborazzi:roborazzi-junit-rule:$roborazzi_version"
+}
+
+// ── Snapshot directories ───────────────────────────────────────────────────
+// references/ → committed baselines (Git LFS). Updated intentionally via saveReferences.
+// images/     → screenshots from the latest test run (gitignored, overwritten each run).
+// diffs/      → pixel-diff output when comparison fails (gitignored).
+
+def refsDir   = file("src/test/snapshots/references")
+def imagesDir = file("src/test/snapshots/images")
+def diffsDir  = file("src/test/snapshots/diffs")
+
+// Pull device-side screenshots to images/ after connected tests complete
+task pullScreenshots(type: Exec) {
+    doFirst { imagesDir.mkdirs() }
+    commandLine 'adb', 'pull',
+        '/sdcard/roborazzi-snapshots/.',
+        imagesDir.absolutePath
+    ignoreExitValue = true
+}
+
+// Pixel-diff images/ against references/. Saves red-pixel diffs to diffs/ and fails on mismatch.
+task compareScreenshots {
+    dependsOn pullScreenshots
+
+    doLast {
+        if (!refsDir.exists() || refsDir.listFiles()?.length == 0) {
+            println "[compareScreenshots] No references found — run ./gradlew saveReferences first."
+            return
+        }
+
+        diffsDir.mkdirs()
+        boolean failed = false
+
+        imagesDir.listFiles()?.findAll { it.name.endsWith('.png') }?.each { actual ->
+            def ref = new File(refsDir, actual.name)
+            if (!ref.exists()) {
+                println "[NEW] ${actual.name} — no reference yet (run saveReferences to accept)"
+                return
+            }
+
+            def imgA = javax.imageio.ImageIO.read(actual)
+            def imgR = javax.imageio.ImageIO.read(ref)
+
+            if (imgA.width != imgR.width || imgA.height != imgR.height) {
+                println "[FAIL] ${actual.name} — size changed ${imgR.width}x${imgR.height} → ${imgA.width}x${imgA.height}"
+                failed = true
+                return
+            }
+
+            long diffPixels = 0
+            def diffImg = new java.awt.image.BufferedImage(imgA.width, imgA.height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+            for (int y = 0; y < imgA.height; y++) {
+                for (int x = 0; x < imgA.width; x++) {
+                    int ap = imgA.getRGB(x, y)
+                    int rp = imgR.getRGB(x, y)
+                    if (ap != rp) {
+                        diffPixels++
+                        diffImg.setRGB(x, y, 0xFFFF0000.toInteger()) // red for changed pixels
+                    } else {
+                        diffImg.setRGB(x, y, ap)
+                    }
+                }
+            }
+
+            def total = (long) imgA.width * imgA.height
+            def pct   = String.format("%.2f", diffPixels * 100.0 / total)
+            if (diffPixels > 0) {
+                println "[FAIL] ${actual.name} — ${diffPixels} pixels differ (${pct}%)"
+                javax.imageio.ImageIO.write(diffImg, "PNG", new File(diffsDir, actual.name))
+                failed = true
+            } else {
+                println "[PASS] ${actual.name}"
+            }
+        }
+
+        if (failed) {
+            throw new GradleException("Screenshot comparison failed. Check diffs at: ${diffsDir.absolutePath}")
+        }
+    }
+}
+
+// Copy images/ → references/ to accept current screenshots as new baselines
+task saveReferences(type: Copy) {
+    description "Accept current screenshots as the new baseline for comparison"
+    from imagesDir
+    into refsDir
+    include '**/*.png'
+}
+
+afterEvaluate {
+    tasks.findByName('connectedDebugAndroidTest')?.finalizedBy(pullScreenshots)
+    pullScreenshots.finalizedBy(compareScreenshots)
 }

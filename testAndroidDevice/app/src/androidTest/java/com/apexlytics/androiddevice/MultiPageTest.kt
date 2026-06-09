@@ -1,8 +1,6 @@
 package com.apexlytics.androiddevice
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.uiautomator.By
-import androidx.test.uiautomator.Until
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -14,22 +12,36 @@ class MultiPageTest : BaseTest() {
     fun setUp() = launchApp()
 
     @Test
-    fun multiPage_screenshots() {
+    fun multiPage_fullFlow_aiPlayground() {
+        // Page 1 — Login screen (before submitting)
         captureScreen("multi_page__1_login")
 
-        // TODO: replace with real credentials
-        device.findObject(By.res(APP_PACKAGE, "usernameField"))?.text = "user@example.com"
-        device.findObject(By.res(APP_PACKAGE, "passwordField"))?.text = "password123"
-        device.findObject(By.text("LOG IN"))?.click()
-            ?: device.findObject(By.text("Login"))?.click()
-        device.wait(Until.gone(By.res(APP_PACKAGE, "loginButton")), NAV_TIMEOUT)
-        Thread.sleep(2000)
+        login()
 
+        // Page 2 — Flow Selector
         captureScreen("multi_page__2_flow_selector")
 
-        device.findObject(By.clickable(true).pkg(APP_PACKAGE))?.click()
-        Thread.sleep(2000)
+        navigateToFullFlow()
 
+        // Page 3 — Dashboard (top, AI Playground card visible)
         captureScreen("multi_page__3_dashboard")
+
+        navigateToAiPlayground()
+
+        // Page 4 — AI Playground top (Strict Match + Layout Match sections)
+        captureScreen("multi_page__4_ai_playground_top")
+
+        // Scroll to Dynamic Match + Floating Region sections
+        scrollDown(3)
+
+        // Page 5 — AI Playground middle (dynamic timestamp, floating element)
+        captureScreen("multi_page__5_ai_playground_dynamic")
+
+        // Scroll to Exact Match + Scroll Test Cards
+        scrollDown(4)
+
+        // Page 6 — AI Playground end (Scroll Test Cards + end of page)
+        scrollDown(8)
+        captureScreen("multi_page__6_ai_playground_end")
     }
 }
