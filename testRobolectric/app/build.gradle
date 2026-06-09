@@ -121,7 +121,8 @@ task pushResults {
     doLast {
         project.ext.roboTimings.pushStart = System.currentTimeMillis()
 
-        def gitDir = rootProject.projectDir
+        // rootProject.projectDir = testRobolectric/; repo root is one level up
+        def gitDir = rootProject.projectDir.parentFile
         exec { workingDir gitDir; commandLine 'git', 'add', 'testRobolectric/app/src/test/snapshots/diffs/' }
         def statusOut = new ByteArrayOutputStream()
         exec { workingDir gitDir; commandLine 'git', 'status', '--porcelain'; standardOutput = statusOut }

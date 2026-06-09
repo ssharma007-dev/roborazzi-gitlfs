@@ -164,7 +164,8 @@ task pushResults {
     doLast {
         project.ext.phaseTimings.pushStart = System.currentTimeMillis()
 
-        def gitDir = rootProject.projectDir
+        // rootProject.projectDir = testAndroidDevice/; repo root is one level up
+        def gitDir = rootProject.projectDir.parentFile
         exec { workingDir gitDir; commandLine 'git', 'add', 'testAndroidDevice/app/src/test/snapshots/diffs/' }
         def statusOut = new ByteArrayOutputStream()
         exec { workingDir gitDir; commandLine 'git', 'status', '--porcelain'; standardOutput = statusOut }
