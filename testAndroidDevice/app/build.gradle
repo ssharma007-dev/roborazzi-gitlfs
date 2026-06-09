@@ -55,7 +55,8 @@ task pullScreenshots(type: Exec) {
     ignoreExitValue = true
 }
 
-// Pixel-diff images/ against references/. Saves red-pixel diffs to diffs/ and fails on mismatch.
+// Pixel-diff images/ against references/.
+// Saves a 3-panel diff (REFERENCE | DIFF | ACTUAL) to diffs/ and fails the build on mismatch.
 task compareScreenshots {
     dependsOn pullScreenshots
 
@@ -67,6 +68,7 @@ task compareScreenshots {
 
         diffsDir.mkdirs()
         boolean failed = false
+        int GAP = 4  // pixel gap between the three panels
 
         imagesDir.listFiles()?.findAll { it.name.endsWith('.png') }?.each { actual ->
             def ref = new File(refsDir, actual.name)
@@ -84,26 +86,55 @@ task compareScreenshots {
                 return
             }
 
+            int W = imgA.width, H = imgA.height
             long diffPixels = 0
-            def diffImg = new java.awt.image.BufferedImage(imgA.width, imgA.height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
-            for (int y = 0; y < imgA.height; y++) {
-                for (int x = 0; x < imgA.width; x++) {
+
+            // Middle panel: red where pixels differ, original colour where they match
+            def diffPanel = new java.awt.image.BufferedImage(W, H, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+            for (int y = 0; y < H; y++) {
+                for (int x = 0; x < W; x++) {
                     int ap = imgA.getRGB(x, y)
                     int rp = imgR.getRGB(x, y)
                     if (ap != rp) {
                         diffPixels++
-                        diffImg.setRGB(x, y, 0xFFFF0000.toInteger()) // red for changed pixels
+                        diffPanel.setRGB(x, y, 0xFFFF0000.toInteger())
                     } else {
-                        diffImg.setRGB(x, y, ap)
+                        diffPanel.setRGB(x, y, ap)
                     }
                 }
             }
 
-            def total = (long) imgA.width * imgA.height
+            def total = (long) W * H
             def pct   = String.format("%.2f", diffPixels * 100.0 / total)
+
             if (diffPixels > 0) {
                 println "[FAIL] ${actual.name} — ${diffPixels} pixels differ (${pct}%)"
-                javax.imageio.ImageIO.write(diffImg, "PNG", new File(diffsDir, actual.name))
+
+                // Build 3-panel image: REFERENCE | DIFF | ACTUAL
+                int panelW = W * 3 + GAP * 2
+                def composite = new java.awt.image.BufferedImage(panelW, H, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+                def g = composite.createGraphics()
+
+                // Fill background (dark separator between panels)
+                g.setColor(java.awt.Color.DARK_GRAY)
+                g.fillRect(0, 0, panelW, H)
+
+                g.drawImage(imgR,    0,            0, null)   // left  — reference
+                g.drawImage(diffPanel, W + GAP,    0, null)   // middle — diff
+                g.drawImage(imgA,    W * 2 + GAP * 2, 0, null) // right — actual
+
+                // Label each panel
+                g.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, 28))
+                def labels = ["REFERENCE", "DIFF (${diffPixels}px / ${pct}%)", "ACTUAL"]
+                [0, W + GAP, W * 2 + GAP * 2].eachWithIndex { xOff, i ->
+                    g.setColor(new java.awt.Color(0, 0, 0, 160))
+                    g.fillRect(xOff, 0, W, 40)
+                    g.setColor(java.awt.Color.WHITE)
+                    g.drawString(labels[i], xOff + 8, 30)
+                }
+                g.dispose()
+
+                javax.imageio.ImageIO.write(composite, "PNG", new File(diffsDir, actual.name))
                 failed = true
             } else {
                 println "[PASS] ${actual.name}"
