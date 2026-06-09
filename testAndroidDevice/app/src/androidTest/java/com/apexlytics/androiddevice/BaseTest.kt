@@ -29,13 +29,7 @@ abstract class BaseTest {
         Thread.sleep(2000)
     }
 
-    protected fun login(username: String = "user", password: String = "user") {
-        device.findObject(By.res(APP_PACKAGE, "usernameInput"))?.apply {
-            clear(); text = username
-        }
-        device.findObject(By.res(APP_PACKAGE, "passwordInput"))?.apply {
-            clear(); text = password
-        }
+    protected fun login() {
         device.findObject(By.res(APP_PACKAGE, "loginButton"))?.click()
         device.wait(Until.hasObject(By.res(APP_PACKAGE, "flowSelectorTitle")), NAV_TIMEOUT)
         Thread.sleep(1000)
