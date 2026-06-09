@@ -1,0 +1,57 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'io.github.takahirom.roborazzi'
+}
+
+android {
+    namespace 'com.apexlytics.androiddevice'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.apexlytics.androiddevice"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunnerArguments(["roborazzi.test.record": project.properties["roborazzi.test.record"] ?: "false"])
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    kotlinOptions {
+        jvmTarget = '11'
+    }
+}
+
+roborazzi {
+    outputDir = file("src/test/snapshots/images")
+}
+
+// After connected tests finish, pull device-side screenshots to the host snapshots directory
+task pullScreenshots(type: Exec) {
+    def snapshotsDir = file("src/test/snapshots/images")
+    doFirst { snapshotsDir.mkdirs() }
+    commandLine 'adb', 'pull',
+        '/sdcard/roborazzi-snapshots/.',
+        snapshotsDir.absolutePath
+    ignoreExitValue = true
+}
+
+afterEvaluate {
+    tasks.findByName('connectedDebugAndroidTest')?.finalizedBy(pullScreenshots)
+}
+
+def roborazzi_version = rootProject.ext.roborazzi_version
+
+dependencies {
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test:rules:1.6.1'
+    androidTestImplementation 'androidx.test.uiautomator:uiautomator:2.3.0'
+    androidTestImplementation "io.github.takahirom.roborazzi:roborazzi:$roborazzi_version"
+    androidTestImplementation "io.github.takahirom.roborazzi:roborazzi-junit-rule:$roborazzi_version"
+}
